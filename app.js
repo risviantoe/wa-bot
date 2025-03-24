@@ -31,7 +31,10 @@ client.on("auth_failure", (msg) => {
   console.error("WhatsApp authentication failed:", msg);
 });
 
-// Handle incoming messages (NEW)
+// Store pending commands in memory
+global.pendingCommands = [];
+
+// Handle incoming messages (UPDATED)
 client.on("message", async (msg) => {
   // Check if the message is from a group
   if (msg.from.endsWith("@g.us")) {
@@ -39,6 +42,13 @@ client.on("message", async (msg) => {
 
     // Process commands
     if (msg.body.startsWith("!cek")) {
+      // Store the command for Google Apps Script to retrieve
+      global.pendingCommands.push({
+        chatId: msg.from,
+        body: msg.body,
+        timestamp: new Date().getTime(),
+      });
+
       handleCommands(msg, chat);
     }
   }
@@ -118,17 +128,21 @@ app.get("/get-groups", async (req, res) => {
   }
 });
 
-// New endpoint to check for commands (NEW)
+// Endpoint to check for commands (UPDATED)
 app.get("/check-commands", async (req, res) => {
   try {
-    // This endpoint will be called by Google Apps Script to check if any command messages were received
-    return res.status(200).json({
-      success: true,
-      pendingCommands: global.pendingCommands || [],
-    });
+    // Make a copy of pending commands
+    const commands = [...(global.pendingCommands || [])];
 
     // Clear pending commands after they're retrieved
     global.pendingCommands = [];
+
+    console.log(`Returning ${commands.length} pending commands`);
+
+    return res.status(200).json({
+      success: true,
+      pendingCommands: commands,
+    });
   } catch (error) {
     console.error("Error checking commands:", error);
     return res.status(500).json({

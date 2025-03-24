@@ -34,8 +34,8 @@ function resetAndCreateTriggers() {
   // Create a time-based trigger to process pending messages every minute
   ScriptApp.newTrigger("processPendingMessages").timeBased().everyMinutes(1).create();
 
-  // Create a time-based trigger to check for commands every 5 minutes
-  ScriptApp.newTrigger("checkForCommands").timeBased().everyMinutes(5).create();
+  // Create a time-based trigger to check for commands every minutes
+  ScriptApp.newTrigger("checkForCommands").timeBased().everyMinutes(1).create();
 
   // Reset the cache properties
   PropertiesService.getScriptProperties().deleteProperty(MESSAGE_CACHE_PROPERTY);
@@ -432,8 +432,17 @@ function sendLatestFinancialRecord() {
 }
 
 /**
- * NEW: Check for commands from WhatsApp
- * This function will be triggered every 5 minutes by a time-based trigger
+ * Manually process WhatsApp commands
+ * Run this function to check for commands immediately
+ */
+function manualCheckForCommands() {
+  console.log("Manual command check initiated");
+  checkForCommands();
+  return "Command check completed. Check logs for details.";
+}
+
+/**
+ * Updated version of checkForCommands with improved logging and immediate response
  */
 function checkForCommands() {
   try {
@@ -453,6 +462,7 @@ function checkForCommands() {
     }
 
     const responseData = JSON.parse(response.getContentText());
+    console.log("Command check response:", JSON.stringify(responseData));
 
     if (!responseData.success) {
       console.log("Command check failed:", responseData.error);
@@ -461,22 +471,62 @@ function checkForCommands() {
 
     // Process pending commands
     const pendingCommands = responseData.pendingCommands || [];
+    console.log("Pending commands found:", pendingCommands.length);
+
+    if (pendingCommands.length === 0) {
+      return;
+    }
 
     for (const command of pendingCommands) {
       const chatId = command.chatId;
       const messageBody = command.body.toLowerCase().trim();
 
+      console.log(`Processing command: ${messageBody} from ${chatId}`);
+
       // Only process commands for our target group
       if (chatId === GROUP_ID) {
+        // Process commands immediately (no delay)
         if (messageBody === "!cek summary") {
           sendFinancialSummary();
+          console.log("Sent financial summary in response to command");
         } else if (messageBody === "!cek terakhir") {
           sendLatestFinancialRecord();
+          console.log("Sent latest financial record in response to command");
+        } else if (messageBody === "!cek bantuan") {
+          sendCommandMenu();
+          console.log("Sent command menu in response to command");
         }
       }
     }
   } catch (error) {
     console.error("Error checking for commands:", error);
+  }
+}
+
+/**
+ * Process immediate WhatsApp commands - without delay
+ * This function responds to commands directly without queuing
+ */
+function processImmediateCommand(chatId, command) {
+  if (chatId !== GROUP_ID) {
+    console.log(`Ignoring command from non-target chat: ${chatId}`);
+    return;
+  }
+
+  console.log(`Processing immediate command: ${command}`);
+
+  switch (command.toLowerCase().trim()) {
+    case "!cek summary":
+      sendFinancialSummary();
+      break;
+    case "!cek terakhir":
+      sendLatestFinancialRecord();
+      break;
+    case "!cek bantuan":
+      sendCommandMenu();
+      break;
+    default:
+      console.log(`Unknown command: ${command}`);
   }
 }
 
