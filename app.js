@@ -42,13 +42,6 @@ client.on("message", async (msg) => {
 
     // Process commands
     if (msg.body.startsWith("!cek")) {
-      // Store the command for Google Apps Script to retrieve
-      global.pendingCommands.push({
-        chatId: msg.from,
-        body: msg.body,
-        timestamp: new Date().getTime(),
-      });
-
       handleCommands(msg, chat);
     }
   }
@@ -59,14 +52,10 @@ async function handleCommands(msg, chat) {
   const command = msg.body.toLowerCase().trim();
 
   try {
-    // Simpan command untuk Google Apps Script
-    global.pendingCommands.push({
-      chatId: msg.from,
-      body: command,
-      timestamp: new Date().getTime(),
-    });
+    // JANGAN simpan command ke pendingCommands lagi
+    // Command akan diproses langsung via webhook, bukan melalui polling
 
-    // Proses command tertentu secara langsung tanpa menunggu Google Apps Script
+    // Proses command tertentu secara langsung di sisi Node.js
     if (command === "!cek bantuan") {
       const helpMessage =
         `*BANTUAN PERINTAH*\n\n` +
@@ -74,34 +63,46 @@ async function handleCommands(msg, chat) {
         `!cek terakhir - Melihat catatan terakhir\n` +
         `!cek bantuan - Menampilkan pesan ini`;
       await chat.sendMessage(helpMessage);
-      return; // Tidak perlu notifikasi loading
+      return; // Tidak perlu panggil webhook untuk bantuan
     }
 
-    // Notifikasi loading
+    // Notifikasi loading dan eksekusi melalui webhook
     if (command === "!cek summary") {
       await chat.sendMessage("⏳ Mengambil ringkasan keuangan...");
 
       // Panggil langsung endpoint Google Apps Script
-      fetch(
-        "https://script.google.com/macros/s/AKfycbxQDQjMavy4Y7xzDReFpGJdEaPmBimmUOok8TYGeWmLBkxIDBYF2D5w3caLrMS9v2nsHQ/exec",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ command: "summary", chatId: msg.from }),
-        }
-      ).catch((err) => console.error("Error requesting summary:", err));
+      try {
+        const response = await fetch(
+          "https://script.google.com/macros/s/AKfycbxQDQjMavy4Y7xzDReFpGJdEaPmBimmUOok8TYGeWmLBkxIDBYF2D5w3caLrMS9v2nsHQ/exec",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ command: "summary", chatId: msg.from }),
+          }
+        );
+
+        console.log("Summary command sent successfully:", await response.text());
+      } catch (err) {
+        console.error("Error requesting summary:", err);
+      }
     } else if (command === "!cek terakhir") {
       await chat.sendMessage("⏳ Mengambil catatan keuangan terakhir...");
 
       // Panggil langsung endpoint Google Apps Script
-      fetch(
-        "https://script.google.com/macros/s/AKfycbxQDQjMavy4Y7xzDReFpGJdEaPmBimmUOok8TYGeWmLBkxIDBYF2D5w3caLrMS9v2nsHQ/exec",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ command: "terakhir", chatId: msg.from }),
-        }
-      ).catch((err) => console.error("Error requesting latest record:", err));
+      try {
+        const response = await fetch(
+          "https://script.google.com/macros/s/AKfycbxQDQjMavy4Y7xzDReFpGJdEaPmBimmUOok8TYGeWmLBkxIDBYF2D5w3caLrMS9v2nsHQ/exec",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ command: "terakhir", chatId: msg.from }),
+          }
+        );
+
+        console.log("Latest record command sent successfully:", await response.text());
+      } catch (err) {
+        console.error("Error requesting latest record:", err);
+      }
     }
   } catch (error) {
     console.error("Error handling command:", error);
@@ -190,7 +191,7 @@ app.get("/ping", (req, res) => {
   });
 });
 
-// Tambahkan endpoint ini ke app.js
+// Endpoint untuk direct command
 app.post("/direct-command", async (req, res) => {
   try {
     const { command, chatId } = req.body;
@@ -200,7 +201,16 @@ app.post("/direct-command", async (req, res) => {
     }
 
     // Kirim respons langsung ke Google Apps Script
-    const commandResult = await processCommandDirectly(command, chatId);
+    const response = await fetch(
+      "https://script.google.com/macros/s/AKfycbxQDQjMavy4Y7xzDReFpGJdEaPmBimmUOok8TYGeWmLBkxIDBYF2D5w3caLrMS9v2nsHQ/exec",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command, chatId }),
+      }
+    );
+
+    const commandResult = await response.json();
 
     return res.status(200).json({
       success: true,
@@ -214,23 +224,6 @@ app.post("/direct-command", async (req, res) => {
     });
   }
 });
-
-// Fungsi pembantu untuk memproses command langsung
-async function processCommandDirectly(command, chatId) {
-  // Panggil API Google Apps Script Deployment URL dengan command
-  // Ini memerlukan deployment web app dari Google Apps Script
-  const response = await fetch(
-    "https://script.google.com/macros/s/AKfycbxQDQjMavy4Y7xzDReFpGJdEaPmBimmUOok8TYGeWmLBkxIDBYF2D5w3caLrMS9v2nsHQ/exec",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ command, chatId }),
-    }
-  );
-
-  const result = await response.json();
-  return result;
-}
 
 app.listen(port, () => {
   console.log(`WhatsApp API server running on port ${port}`);

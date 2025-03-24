@@ -75,8 +75,8 @@ function resetAndCreateTriggers() {
   // Create a time-based trigger to process pending messages every minute
   ScriptApp.newTrigger("processPendingMessages").timeBased().everyMinutes(1).create();
 
-  // Create a time-based trigger to check for commands every minutes
-  ScriptApp.newTrigger("checkForCommands").timeBased().everyMinutes(1).create();
+  // HAPUS trigger untuk checkForCommands yang menggunakan polling
+  // ScriptApp.newTrigger("checkForCommands").timeBased().everyMinutes(1).create();
 
   // Reset the cache properties
   PropertiesService.getScriptProperties().deleteProperty(MESSAGE_CACHE_PROPERTY);
@@ -457,19 +457,43 @@ function sendFinancialSummary() {
 }
 
 /**
- * NEW: Function to send the latest financial record
+ * Function to send the latest financial record
+ * Now looks for the last row with a date value instead of just the last row
  */
 function sendLatestFinancialRecord() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
   const lastRow = sheet.getLastRow();
 
-  // Generate a financial message for the last row
-  const messageData = generateFinancialMessage(sheet, lastRow, "latest");
+  // Find the last row with a date value (column 2)
+  let lastRowWithDate = 0;
+
+  for (let row = lastRow; row >= 3; row--) {
+    const dateValue = sheet.getRange(row, 2).getValue();
+    if (dateValue && (dateValue instanceof Date || typeof dateValue === "string")) {
+      // Periksa juga kolom lain untuk memastikan ini bukan baris footer/summary
+      const no = sheet.getRange(row, 1).getValue();
+      const uraian = sheet.getRange(row, 4).getValue();
+      if (no && uraian) {
+        lastRowWithDate = row;
+        break;
+      }
+    }
+  }
+
+  if (lastRowWithDate === 0) {
+    // No data found with dates
+    sendWhatsAppMessage("❌ *TIDAK ADA DATA*\nTidak ditemukan catatan keuangan dengan tanggal valid.");
+    return;
+  }
+
+  // Generate a financial message for the last row with date
+  const messageData = generateFinancialMessage(sheet, lastRowWithDate, "latest");
 
   // Add header
   const message = "📝 *CATATAN KEUANGAN TERAKHIR*\n───\n" + messageData.message;
 
   sendWhatsAppMessage(message);
+  console.log(`Sent latest financial record from row ${lastRowWithDate}`);
 }
 
 /**
