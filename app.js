@@ -31,6 +31,45 @@ client.on("auth_failure", (msg) => {
   console.error("WhatsApp authentication failed:", msg);
 });
 
+// Handle incoming messages (NEW)
+client.on("message", async (msg) => {
+  // Check if the message is from a group
+  if (msg.from.endsWith("@g.us")) {
+    const chat = await msg.getChat();
+
+    // Process commands
+    if (msg.body.startsWith("!cek")) {
+      handleCommands(msg, chat);
+    }
+  }
+});
+
+// Function to handle commands (NEW)
+async function handleCommands(msg, chat) {
+  const command = msg.body.toLowerCase().trim();
+
+  try {
+    if (command === "!cek summary") {
+      await chat.sendMessage("⏳ Mengambil ringkasan keuangan...");
+      // The actual data will be retrieved by Google Apps Script
+      // This just notifies the bot to fetch the data
+    } else if (command === "!cek terakhir") {
+      await chat.sendMessage("⏳ Mengambil catatan keuangan terakhir...");
+      // The actual data will be retrieved by Google Apps Script
+    } else if (command === "!cek bantuan") {
+      const helpMessage =
+        `*BANTUAN PERINTAH*\n\n` +
+        `!cek summary - Melihat ringkasan keuangan\n` +
+        `!cek terakhir - Melihat catatan terakhir\n` +
+        `!cek bantuan - Menampilkan pesan ini`;
+      await chat.sendMessage(helpMessage);
+    }
+  } catch (error) {
+    console.error("Error handling command:", error);
+    await chat.sendMessage("⚠️ Terjadi kesalahan saat memproses perintah");
+  }
+}
+
 client.initialize();
 
 app.post("/send-message", async (req, res) => {
@@ -77,6 +116,35 @@ app.get("/get-groups", async (req, res) => {
       error: error.message,
     });
   }
+});
+
+// New endpoint to check for commands (NEW)
+app.get("/check-commands", async (req, res) => {
+  try {
+    // This endpoint will be called by Google Apps Script to check if any command messages were received
+    return res.status(200).json({
+      success: true,
+      pendingCommands: global.pendingCommands || [],
+    });
+
+    // Clear pending commands after they're retrieved
+    global.pendingCommands = [];
+  } catch (error) {
+    console.error("Error checking commands:", error);
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+// New endpoint to test connection (NEW)
+app.get("/ping", (req, res) => {
+  return res.status(200).json({
+    success: true,
+    message: "WhatsApp API server is running",
+    clientStatus: client.info ? "authenticated" : "not authenticated",
+  });
 });
 
 app.listen(port, () => {

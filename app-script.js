@@ -7,11 +7,14 @@ const PENDING_MESSAGES_PROPERTY = "pendingMessages";
 
 // WhatsApp API JS server details
 const WHATSAPP_API_URL = "http://103.87.66.140:3000/send-message";
+const WHATSAPP_CHECK_COMMANDS_URL = "http://103.87.66.140:3000/check-commands";
+const WHATSAPP_PING_URL = "http://103.87.66.140:3000/ping";
 const GROUP_ID = "120363401616760903@g.us";
 
 // Time settings
 const MIN_TIME_BETWEEN_MESSAGES = 60000; // 1 minute
 const MESSAGE_DELAY = 30000; // 30 seconds delay between edit and sending
+const COMMAND_CHECK_INTERVAL = 300000; // 5 minutes
 
 /**
  * Remove all existing triggers and creates required triggers
@@ -30,6 +33,9 @@ function resetAndCreateTriggers() {
 
   // Create a time-based trigger to process pending messages every minute
   ScriptApp.newTrigger("processPendingMessages").timeBased().everyMinutes(1).create();
+
+  // Create a time-based trigger to check for commands every 5 minutes
+  ScriptApp.newTrigger("checkForCommands").timeBased().everyMinutes(5).create();
 
   // Reset the cache properties
   PropertiesService.getScriptProperties().deleteProperty(MESSAGE_CACHE_PROPERTY);
@@ -366,7 +372,7 @@ function sendWhatsAppMessage(message) {
  * Can be run manually from the script editor
  */
 function testWhatsAppIntegration() {
-  const testMessage = "🧪 *TEST NOTIFICATION*\n" + "Dugedagedigedu";
+  const testMessage = "🧪 *TEST NOTIFICATION*\n" + "Sistem komunikasi WhatsApp aktif dan berfungsi";
   sendWhatsAppMessage(testMessage);
 }
 
@@ -383,6 +389,12 @@ function sendFinancialSummary() {
   let totalPemasukan = 0;
   let totalPengeluaran = 0;
 
+  // Get date range for the report
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const formattedStartDate = Utilities.formatDate(startOfMonth, "GMT+7", "dd/MM/yyyy");
+  const formattedEndDate = Utilities.formatDate(now, "GMT+7", "dd/MM/yyyy");
+
   for (let i = 3; i <= lastRow; i++) {
     const uangMasuk = sheet.getRange(i, 5).getValue() || 0;
     const uangKeluar = sheet.getRange(i, 6).getValue() || 0;
@@ -393,11 +405,91 @@ function sendFinancialSummary() {
 
   const message =
     "📊 *RINGKASAN KEUANGAN*\n" +
+    `Periode: ${formattedStartDate} - ${formattedEndDate}\n` +
     "───\n" +
     `Total Pemasukan: *Rp${formatMoney(totalPemasukan)}*\n` +
     `Total Pengeluaran: *Rp${formatMoney(totalPengeluaran)}*\n` +
     `\nSaldo Terkini: *Rp${formatMoney(latestSaldo)}*\n` +
     "───\n";
+
+  sendWhatsAppMessage(message);
+}
+
+/**
+ * NEW: Function to send the latest financial record
+ */
+function sendLatestFinancialRecord() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  const lastRow = sheet.getLastRow();
+
+  // Generate a financial message for the last row
+  const messageData = generateFinancialMessage(sheet, lastRow, "latest");
+
+  // Add header
+  const message = "📝 *CATATAN KEUANGAN TERAKHIR*\n───\n" + messageData.message;
+
+  sendWhatsAppMessage(message);
+}
+
+/**
+ * NEW: Check for commands from WhatsApp
+ * This function will be triggered every 5 minutes by a time-based trigger
+ */
+function checkForCommands() {
+  try {
+    // First check if the WhatsApp API server is online
+    const pingResponse = UrlFetchApp.fetch(WHATSAPP_PING_URL, { muteHttpExceptions: true });
+    if (pingResponse.getResponseCode() !== 200) {
+      console.log("WhatsApp API server is not responding. Skipping command check.");
+      return;
+    }
+
+    // Fetch commands from the WhatsApp server
+    const response = UrlFetchApp.fetch(WHATSAPP_CHECK_COMMANDS_URL, { muteHttpExceptions: true });
+
+    if (response.getResponseCode() !== 200) {
+      console.log("Failed to check commands. Status code:", response.getResponseCode());
+      return;
+    }
+
+    const responseData = JSON.parse(response.getContentText());
+
+    if (!responseData.success) {
+      console.log("Command check failed:", responseData.error);
+      return;
+    }
+
+    // Process pending commands
+    const pendingCommands = responseData.pendingCommands || [];
+
+    for (const command of pendingCommands) {
+      const chatId = command.chatId;
+      const messageBody = command.body.toLowerCase().trim();
+
+      // Only process commands for our target group
+      if (chatId === GROUP_ID) {
+        if (messageBody === "!cek summary") {
+          sendFinancialSummary();
+        } else if (messageBody === "!cek terakhir") {
+          sendLatestFinancialRecord();
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Error checking for commands:", error);
+  }
+}
+
+/**
+ * NEW: Send menu of available commands
+ */
+function sendCommandMenu() {
+  const message =
+    "🔍 *PERINTAH YANG TERSEDIA*\n\n" +
+    "!cek summary - Melihat ringkasan keuangan\n" +
+    "!cek terakhir - Melihat catatan terakhir\n" +
+    "!cek bantuan - Menampilkan pesan ini\n\n" +
+    "Gunakan perintah di atas di grup WhatsApp untuk melihat informasi keuangan.";
 
   sendWhatsAppMessage(message);
 }
@@ -432,5 +524,36 @@ function getWhatsAppGroups() {
     }
   } catch (error) {
     console.error("Error getting WhatsApp groups:", error);
+  }
+}
+
+/**
+ * NEW: Function to test all components of the system
+ */
+function runSystemTest() {
+  try {
+    // 1. Test WhatsApp server connectivity
+    const pingResponse = UrlFetchApp.fetch(WHATSAPP_PING_URL, { muteHttpExceptions: true });
+    const pingStatus = pingResponse.getResponseCode() === 200 ? "ONLINE" : "OFFLINE";
+
+    // 2. Send test message
+    const testMessage =
+      "🔄 *SISTEM TEST*\n\n" +
+      `Status Server: *${pingStatus}*\n` +
+      `Waktu Test: *${Utilities.formatDate(new Date(), "GMT+7", "dd/MM/yyyy HH:mm:ss")} WIB*\n\n` +
+      "Silahkan gunakan perintah berikut:\n" +
+      "!cek summary - Melihat ringkasan keuangan\n" +
+      "!cek terakhir - Melihat catatan terakhir\n" +
+      "!cek bantuan - Menampilkan bantuan";
+
+    sendWhatsAppMessage(testMessage);
+
+    // 3. Log status
+    console.log(`System test completed. WhatsApp server status: ${pingStatus}`);
+
+    return `Test completed. WhatsApp server status: ${pingStatus}`;
+  } catch (error) {
+    console.error("Error during system test:", error);
+    return "Test failed: " + error.toString();
   }
 }
