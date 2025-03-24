@@ -244,8 +244,8 @@ function generateFinancialMessage(sheet, row, updateType) {
     message = "🔄 *UPDATE LAPORAN BENDAHARA* 🔄\n";
   }
 
-  message += `\nNo: ${no}\n`;
-  message += `Tanggal: ${formattedDate} ${jam}\n`;
+  message += `\nNo: *${no}*\n`;
+  message += `Tanggal: *${formattedDate} ${jam} WIB*\n`;
   message += `Keterangan: ${type}\n`;
 
   if (keterangan || uraian) {
