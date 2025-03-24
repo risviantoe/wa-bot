@@ -1,25 +1,59 @@
 // Initialize global variables
-const SHEET_NAME = "REKAP";
+const SHEET_NAME = "YOUR-SHEET-NAME";
 const LAST_ROW_PROCESSED_PROPERTY = "lastRowProcessed";
 const MESSAGE_CACHE_PROPERTY = "lastMessageCache";
 const MESSAGE_TIMESTAMP_PROPERTY = "lastMessageTimestamp";
 const PENDING_MESSAGES_PROPERTY = "pendingMessages";
 
 // WhatsApp API JS server details
-const WHATSAPP_API_URL = "http://103.87.66.140:3000/send-message";
-const WHATSAPP_CHECK_COMMANDS_URL = "http://103.87.66.140:3000/check-commands";
-const WHATSAPP_PING_URL = "http://103.87.66.140:3000/ping";
-const GROUP_ID = "120363401616760903@g.us";
+const WHATSAPP_API_URL = "http://YOUR-SERVER-IP/send-message";
+const WHATSAPP_CHECK_COMMANDS_URL = "http://YOUR-SERVER-IP/check-commands";
+const WHATSAPP_PING_URL = "http://YOUR-SERVER-IP/ping";
+const GROUP_ID = "YOUR-GROUP-ID";
 
 // Time settings
 const MIN_TIME_BETWEEN_MESSAGES = 60000; // 1 minute
 const MESSAGE_DELAY = 30000; // 30 seconds delay between edit and sending
 const COMMAND_CHECK_INTERVAL = 300000; // 5 minutes
 
-/**
- * Remove all existing triggers and creates required triggers
- * Run this function manually when updating the script
- */
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+    const { command, chatId } = data;
+
+    if (chatId !== GROUP_ID) {
+      return ContentService.createTextOutput(
+        JSON.stringify({
+          success: false,
+          error: "Invalid group ID",
+        })
+      ).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    let result = { success: true, action: "none" };
+
+    if (command === "summary" || command === "!cek summary") {
+      sendFinancialSummary();
+      result.action = "summary";
+    } else if (command === "terakhir" || command === "!cek terakhir") {
+      sendLatestFinancialRecord();
+      result.action = "latest";
+    } else if (command === "bantuan" || command === "!cek bantuan") {
+      sendCommandMenu();
+      result.action = "help";
+    }
+
+    return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+  } catch (error) {
+    return ContentService.createTextOutput(
+      JSON.stringify({
+        success: false,
+        error: error.toString(),
+      })
+    ).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
 function resetAndCreateTriggers() {
   // Delete all existing triggers
   const allTriggers = ScriptApp.getProjectTriggers();
@@ -34,9 +68,6 @@ function resetAndCreateTriggers() {
   // Create a time-based trigger to process pending messages every minute
   ScriptApp.newTrigger("processPendingMessages").timeBased().everyMinutes(1).create();
 
-  // Create a time-based trigger to check for commands every minutes
-  ScriptApp.newTrigger("checkForCommands").timeBased().everyMinutes(1).create();
-
   // Reset the cache properties
   PropertiesService.getScriptProperties().deleteProperty(MESSAGE_CACHE_PROPERTY);
   PropertiesService.getScriptProperties().deleteProperty(MESSAGE_TIMESTAMP_PROPERTY);
@@ -45,10 +76,6 @@ function resetAndCreateTriggers() {
   console.log("All triggers reset and new triggers created successfully");
 }
 
-/**
- * This function runs automatically when the spreadsheet is edited.
- * Instead of sending messages immediately, it queues them for delayed sending.
- */
 function onEdit(e) {
   const lock = LockService.getScriptLock();
 
@@ -97,9 +124,6 @@ function onEdit(e) {
   }
 }
 
-/**
- * Queues a message to be sent after a delay
- */
 function queueMessageForDelayedSending(message, row, updateType) {
   const properties = PropertiesService.getScriptProperties();
 
@@ -122,10 +146,6 @@ function queueMessageForDelayedSending(message, row, updateType) {
   console.log(`Message queued for sending in ${MESSAGE_DELAY / 1000} seconds`);
 }
 
-/**
- * Process any pending messages that are ready to be sent
- * This function will be triggered every minute by a time-based trigger
- */
 function processPendingMessages() {
   const lock = LockService.getScriptLock();
 
@@ -179,9 +199,6 @@ function processPendingMessages() {
   }
 }
 
-/**
- * Checks if all required fields in a row are filled
- */
 function checkRowCompleteness(sheet, row) {
   // Required columns (except uang masuk and uang keluar)
   // 1:No, 2:Tanggal, 3:Jam, 4:Uraian, 7:Saldo, 9:Catatan
@@ -204,9 +221,6 @@ function checkRowCompleteness(sheet, row) {
   return true;
 }
 
-/**
- * Generates a financial update message
- */
 function generateFinancialMessage(sheet, row, updateType) {
   const no = sheet.getRange(row, 1).getValue();
   const tanggal = sheet.getRange(row, 2).getValue();
@@ -290,9 +304,6 @@ function generateFinancialMessage(sheet, row, updateType) {
   };
 }
 
-/**
- * Checks if a message is a duplicate of one recently sent
- */
 function isDuplicateMessage(message) {
   const properties = PropertiesService.getScriptProperties();
   const lastMessage = properties.getProperty(MESSAGE_CACHE_PROPERTY);
@@ -312,25 +323,16 @@ function isDuplicateMessage(message) {
   return false;
 }
 
-/**
- * Caches the last message sent and timestamp
- */
 function cacheLastMessage(message) {
   const properties = PropertiesService.getScriptProperties();
   properties.setProperty(MESSAGE_CACHE_PROPERTY, message);
   properties.setProperty(MESSAGE_TIMESTAMP_PROPERTY, new Date().getTime().toString());
 }
 
-/**
- * Formats a number as currency (adds thousand separators)
- */
 function formatMoney(amount) {
   return amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 }
 
-/**
- * Sends a message to WhatsApp using the WhatsApp Web JS API
- */
 function sendWhatsAppMessage(message) {
   try {
     const payload = {
@@ -367,19 +369,11 @@ function sendWhatsAppMessage(message) {
   }
 }
 
-/**
- * Manual test function to verify everything is working
- * Can be run manually from the script editor
- */
 function testWhatsAppIntegration() {
   const testMessage = "🧪 *TEST NOTIFICATION*\n" + "Sistem komunikasi WhatsApp aktif dan berfungsi";
   sendWhatsAppMessage(testMessage);
 }
 
-/**
- * Function to manually send a summary of the current financial status
- * Can be run on a time-based trigger (e.g., daily or weekly)
- */
 function sendFinancialSummary() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
   const lastRow = sheet.getLastRow();
@@ -415,35 +409,46 @@ function sendFinancialSummary() {
   sendWhatsAppMessage(message);
 }
 
-/**
- * NEW: Function to send the latest financial record
- */
 function sendLatestFinancialRecord() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
   const lastRow = sheet.getLastRow();
 
-  // Generate a financial message for the last row
-  const messageData = generateFinancialMessage(sheet, lastRow, "latest");
+  // Find the last row with a date value (column 2)
+  let lastRowWithDate = 0;
 
-  // Add header
+  for (let row = lastRow; row >= 3; row--) {
+    const dateValue = sheet.getRange(row, 2).getValue();
+    if (dateValue && (dateValue instanceof Date || typeof dateValue === "string")) {
+      const no = sheet.getRange(row, 1).getValue();
+      const uraian = sheet.getRange(row, 4).getValue();
+      if (no && uraian) {
+        lastRowWithDate = row;
+        break;
+      }
+    }
+  }
+
+  if (lastRowWithDate === 0) {
+    // No data found with dates
+    sendWhatsAppMessage("❌ *TIDAK ADA DATA*\nTidak ditemukan catatan keuangan dengan tanggal valid.");
+    return;
+  }
+
+  // Generate a financial message for the last row with date
+  const messageData = generateFinancialMessage(sheet, lastRowWithDate, "latest");
+
   const message = "📝 *CATATAN KEUANGAN TERAKHIR*\n───\n" + messageData.message;
 
   sendWhatsAppMessage(message);
+  console.log(`Sent latest financial record from row ${lastRowWithDate}`);
 }
 
-/**
- * Manually process WhatsApp commands
- * Run this function to check for commands immediately
- */
 function manualCheckForCommands() {
   console.log("Manual command check initiated");
   checkForCommands();
   return "Command check completed. Check logs for details.";
 }
 
-/**
- * Updated version of checkForCommands with improved logging and immediate response
- */
 function checkForCommands() {
   try {
     // First check if the WhatsApp API server is online
@@ -503,10 +508,6 @@ function checkForCommands() {
   }
 }
 
-/**
- * Process immediate WhatsApp commands - without delay
- * This function responds to commands directly without queuing
- */
 function processImmediateCommand(chatId, command) {
   if (chatId !== GROUP_ID) {
     console.log(`Ignoring command from non-target chat: ${chatId}`);
@@ -530,9 +531,6 @@ function processImmediateCommand(chatId, command) {
   }
 }
 
-/**
- * NEW: Send menu of available commands
- */
 function sendCommandMenu() {
   const message =
     "🔍 *PERINTAH YANG TERSEDIA*\n\n" +
@@ -544,22 +542,14 @@ function sendCommandMenu() {
   sendWhatsAppMessage(message);
 }
 
-/**
- * Sets up a time-based trigger to send daily summaries
- * Run this function once manually to create the trigger
- */
 function createDailySummaryTrigger() {
   ScriptApp.newTrigger("sendFinancialSummary").timeBased().atHour(21).everyDays(1).create();
   console.log("Daily summary trigger created successfully");
 }
 
-/**
- * Function to get the group ID by connecting to the WhatsApp Web JS server
- * Run this manually to see list of available groups
- */
 function getWhatsAppGroups() {
   try {
-    const apiUrl = "http://103.87.66.140:3000/get-groups";
+    const apiUrl = "http://YOUR-SERVER-IP/get-groups";
     const response = UrlFetchApp.fetch(apiUrl);
 
     const responseText = response.getContentText();
@@ -577,9 +567,6 @@ function getWhatsAppGroups() {
   }
 }
 
-/**
- * NEW: Function to test all components of the system
- */
 function runSystemTest() {
   try {
     // 1. Test WhatsApp server connectivity
@@ -598,7 +585,6 @@ function runSystemTest() {
 
     sendWhatsAppMessage(testMessage);
 
-    // 3. Log status
     console.log(`System test completed. WhatsApp server status: ${pingStatus}`);
 
     return `Test completed. WhatsApp server status: ${pingStatus}`;

@@ -2,8 +2,12 @@ const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
 const express = require("express");
 const bodyParser = require("body-parser");
+const dotenv = require("dotenv");
+
+dotenv.config();
+
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
@@ -31,48 +35,60 @@ client.on("auth_failure", (msg) => {
   console.error("WhatsApp authentication failed:", msg);
 });
 
-// Store pending commands in memory
 global.pendingCommands = [];
 
-// Handle incoming messages (UPDATED)
 client.on("message", async (msg) => {
-  // Check if the message is from a group
   if (msg.from.endsWith("@g.us")) {
     const chat = await msg.getChat();
 
-    // Process commands
     if (msg.body.startsWith("!cek")) {
-      // Store the command for Google Apps Script to retrieve
-      global.pendingCommands.push({
-        chatId: msg.from,
-        body: msg.body,
-        timestamp: new Date().getTime(),
-      });
-
       handleCommands(msg, chat);
     }
   }
 });
 
-// Function to handle commands (NEW)
 async function handleCommands(msg, chat) {
   const command = msg.body.toLowerCase().trim();
 
   try {
-    if (command === "!cek summary") {
-      await chat.sendMessage("⏳ Mengambil ringkasan keuangan...");
-      // The actual data will be retrieved by Google Apps Script
-      // This just notifies the bot to fetch the data
-    } else if (command === "!cek terakhir") {
-      await chat.sendMessage("⏳ Mengambil catatan keuangan terakhir...");
-      // The actual data will be retrieved by Google Apps Script
-    } else if (command === "!cek bantuan") {
+    if (command === "!cek bantuan") {
       const helpMessage =
         `*BANTUAN PERINTAH*\n\n` +
         `!cek summary - Melihat ringkasan keuangan\n` +
         `!cek terakhir - Melihat catatan terakhir\n` +
         `!cek bantuan - Menampilkan pesan ini`;
       await chat.sendMessage(helpMessage);
+      return;
+    }
+
+    if (command === "!cek summary") {
+      await chat.sendMessage("⏳ Mengambil ringkasan keuangan...");
+
+      try {
+        const response = await fetch(process.env.WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ command: "summary", chatId: msg.from }),
+        });
+
+        console.log("Summary command sent successfully:", await response.text());
+      } catch (err) {
+        console.error("Error requesting summary:", err);
+      }
+    } else if (command === "!cek terakhir") {
+      await chat.sendMessage("⏳ Mengambil catatan keuangan terakhir...");
+
+      try {
+        const response = await fetch(process.env.WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ command: "terakhir", chatId: msg.from }),
+        });
+
+        console.log("Latest record command sent successfully:", await response.text());
+      } catch (err) {
+        console.error("Error requesting latest record:", err);
+      }
     }
   } catch (error) {
     console.error("Error handling command:", error);
@@ -128,13 +144,9 @@ app.get("/get-groups", async (req, res) => {
   }
 });
 
-// Endpoint to check for commands (UPDATED)
 app.get("/check-commands", async (req, res) => {
   try {
-    // Make a copy of pending commands
     const commands = [...(global.pendingCommands || [])];
-
-    // Clear pending commands after they're retrieved
     global.pendingCommands = [];
 
     console.log(`Returning ${commands.length} pending commands`);
@@ -152,13 +164,41 @@ app.get("/check-commands", async (req, res) => {
   }
 });
 
-// New endpoint to test connection (NEW)
 app.get("/ping", (req, res) => {
   return res.status(200).json({
     success: true,
     message: "WhatsApp API server is running",
     clientStatus: client.info ? "authenticated" : "not authenticated",
   });
+});
+
+app.post("/direct-command", async (req, res) => {
+  try {
+    const { command, chatId } = req.body;
+
+    if (!command || !chatId) {
+      return res.status(400).json({ success: false, error: "Command and chatId are required" });
+    }
+
+    const response = await fetch(process.env.WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command, chatId }),
+    });
+
+    const commandResult = await response.json();
+
+    return res.status(200).json({
+      success: true,
+      result: commandResult,
+    });
+  } catch (error) {
+    console.error("Error processing direct command:", error);
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
 });
 
 app.listen(port, () => {
