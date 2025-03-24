@@ -17,6 +17,47 @@ const MESSAGE_DELAY = 30000; // 30 seconds delay between edit and sending
 const COMMAND_CHECK_INTERVAL = 300000; // 5 minutes
 
 /**
+ * Handle web requests for direct command processing
+ */
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+    const { command, chatId } = data;
+
+    if (chatId !== GROUP_ID) {
+      return ContentService.createTextOutput(
+        JSON.stringify({
+          success: false,
+          error: "Invalid group ID",
+        })
+      ).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    let result = { success: true, action: "none" };
+
+    if (command === "summary" || command === "!cek summary") {
+      sendFinancialSummary();
+      result.action = "summary";
+    } else if (command === "terakhir" || command === "!cek terakhir") {
+      sendLatestFinancialRecord();
+      result.action = "latest";
+    } else if (command === "bantuan" || command === "!cek bantuan") {
+      sendCommandMenu();
+      result.action = "help";
+    }
+
+    return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+  } catch (error) {
+    return ContentService.createTextOutput(
+      JSON.stringify({
+        success: false,
+        error: error.toString(),
+      })
+    ).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+/**
  * Remove all existing triggers and creates required triggers
  * Run this function manually when updating the script
  */
