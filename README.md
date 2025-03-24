@@ -1,104 +1,121 @@
-# WhatsApp Financial Report Bot
+# WhatsApp Bot for Financial Reporting
 
-A Google Apps Script-based automation system that monitors a financial spreadsheet and sends automatic notifications to a WhatsApp group when financial transactions are recorded.
+A Google Apps Script project that connects a Google Sheet with a WhatsApp group to automatically send financial reports and respond to commands.
 
 ## Overview
 
-This system consists of two main components:
-
-1. A Google Apps Script that runs within a Google Sheet to monitor changes and generate financial reports
-2. A Node.js server that connects to WhatsApp Web and provides an API for sending messages
+This system integrates a financial tracking spreadsheet with WhatsApp, automatically posting updates when financial entries are modified. It also responds to commands from group members to provide financial summaries and information.
 
 ## Features
 
-- 🔄 Automatic detection of new financial entries
-- 💰 Formatted financial reports sent to WhatsApp
-- 📊 Daily financial summaries
-- ⏱️ Delayed message sending to prevent duplicate notifications
-- 🔒 Ensures complete data before sending notifications
-- 🚫 Duplicate message prevention
+- Automatic notification of new financial entries
+- Update notifications when existing entries are modified
+- Command-based interaction (!cek summary, !cek terakhir, !cek bantuan)
+- Financial summaries with customizable formatting
+- Intelligent message throttling to prevent duplicates
+- Delayed message sending to allow for rapid consecutive edits
 
 ## Setup Instructions
 
-### Google Sheet Setup
+### Google Sheets Setup
 
-1. Create or open your financial spreadsheet in Google Sheets
-2. Ensure it has a sheet named "REKAP" with the following columns:
-   - Col 1: No
-   - Col 2: Tanggal (Date)
-   - Col 3: Jam (Time)
-   - Col 4: Uraian (Description)
-   - Col 5: Uang Masuk (Income)
-   - Col 6: Uang Keluar (Expense)
-   - Col 7: Saldo (Balance)
-   - Col 8: Keterangan (Additional Notes)
-   - Col 9: Catatan (Category/Notes)
-3. Open the Script Editor (Extensions > Apps Script)
-4. Copy the contents of `app-script.js` into the editor
-5. Save the script with a name like "Financial WhatsApp Bot"
+1. Create a new Google Sheet or use an existing financial tracking sheet
+2. Format your sheet with the following columns:
+   - Column 1: No (transaction number)
+   - Column 2: Tanggal (date)
+   - Column 3: Jam (time)
+   - Column 4: Uraian (description)
+   - Column 5: Uang Masuk (money in)
+   - Column 6: Uang Keluar (money out)
+   - Column 7: Saldo (balance)
+   - Column 8: Keterangan (additional notes)
+   - Column 9: Catatan (formatted notes)
+3. Name your sheet tab appropriately
 
-### WhatsApp Server Setup
+### WhatsApp API Server Setup
 
-1. Ensure you have Node.js installed on your server
-2. Clone this repository to your server
-3. Install dependencies:
+1. Set up the WhatsApp API server (not included in this repository)
+2. Make sure the server has the following endpoints:
+   - `/send-message` - For sending messages
+   - `/check-commands` - For checking pending commands
+   - `/ping` - For checking server status
+   - `/get-groups` - For listing available groups
+
+### Google Apps Script Setup
+
+1. Open your Google Sheet
+2. Go to Extensions > Apps Script
+3. Copy the contents of `app-script.js` into the script editor
+4. Replace the configuration variables at the top:
+   ```javascript
+   const SHEET_NAME = "YOUR-SHEET-NAME";
+   const WHATSAPP_API_URL = "http://YOUR-SERVER-IP/send-message";
+   const WHATSAPP_CHECK_COMMANDS_URL = "http://YOUR-SERVER-IP/check-commands";
+   const WHATSAPP_PING_URL = "http://YOUR-SERVER-IP/ping";
+   const GROUP_ID = "YOUR-GROUP-ID";
    ```
-   npm install
-   ```
-4. Build and run the Docker container:
-   ```
-   docker build -t wa-bot-lap-keuangan .
-   docker run -p 3000:3000 wa-bot-lap-keuangan
-   ```
-5. When the server starts, it will display a QR code in the console
-6. Scan this QR code with WhatsApp on your phone to authenticate
+5. Save the project
 
-## Configuring the Google Apps Script
+### Deploying the Web App
 
-1. In the script editor, modify the following constants at the top of the script:
+1. Click on Deploy > New deployment
+2. Select "Web app" as the type
+3. Set the following options:
+   - Execute as: Me
+   - Who has access: Anyone
+4. Click Deploy
+5. Copy the web app URL for configuration with your WhatsApp API server
 
-   - `WHATSAPP_API_URL`: URL of your WhatsApp API server
-   - `GROUP_ID`: The WhatsApp group ID where messages should be sent
+## Configuration Variables
 
-2. Run the `resetAndCreateTriggers` function manually to set up all required triggers
-3. Optionally run `createDailySummaryTrigger` to set up daily financial summaries
+- `SHEET_NAME`: The exact name of your sheet tab
+- `WHATSAPP_API_URL`: URL for sending WhatsApp messages
+- `WHATSAPP_CHECK_COMMANDS_URL`: URL for checking pending commands
+- `WHATSAPP_PING_URL`: URL for pinging the WhatsApp server
+- `GROUP_ID`: WhatsApp group ID to send messages to
+- `MIN_TIME_BETWEEN_MESSAGES`: Minimum time between duplicate messages (ms)
+- `MESSAGE_DELAY`: Delay between edit and message sending (ms)
+- `COMMAND_CHECK_INTERVAL`: Interval for checking new commands (ms)
 
-## Using the System
+## Usage
 
-Once set up, the system works automatically:
+### Initializing the System
 
-1. When you add or edit a row in the spreadsheet, the system checks if all required fields are filled
-2. If the row is complete, it generates a formatted financial message
-3. The message is queued for sending after a short delay (to avoid sending during active editing)
-4. The message is sent to the configured WhatsApp group
+1. After setting up configuration, run the `resetAndCreateTriggers` function once
+2. Use `getWhatsAppGroups` to find your group ID if you don't know it
+3. Run `testWhatsAppIntegration` to test the connection
+4. Use `runSystemTest` for a more comprehensive test
 
-## Manual Functions
+### Available Commands
 
-The script includes several functions you can run manually:
+Users in the WhatsApp group can use these commands:
 
-- `resetAndCreateTriggers`: Set up all required triggers
-- `testWhatsAppIntegration`: Send a test message to verify the system is working
-- `sendFinancialSummary`: Send a summary of current financial status
-- `createDailySummaryTrigger`: Set up automatic daily summaries
-- `getWhatsAppGroups`: List available WhatsApp groups and their IDs
+- `!cek summary` - Get a financial summary report
+- `!cek terakhir` - Get the latest financial transaction
+- `!cek bantuan` - Get a list of available commands
+
+### Administrative Functions
+
+- `resetAndCreateTriggers` - Reset and create all necessary triggers
+- `createDailySummaryTrigger` - Create a trigger to send daily summaries
+- `getWhatsAppGroups` - Get a list of available WhatsApp groups
+- `testWhatsAppIntegration` - Test the WhatsApp connection
+- `runSystemTest` - Run a comprehensive system test
+- `manualCheckForCommands` - Manually check for pending commands
 
 ## Troubleshooting
 
-### Common Issues
+- If messages aren't being sent, check the WhatsApp server status with `runSystemTest`
+- Check the Apps Script execution logs for error messages
+- Verify that the sheet name exactly matches the configured `SHEET_NAME`
+- Ensure the WhatsApp API server is online and accessible
 
-1. **Messages not sending**: Check that your WhatsApp server is running and the QR code has been scanned
-2. **Duplicate messages**: The system has built-in protection against duplicates. If necessary, run `resetAndCreateTriggers` to reset the message cache
-3. **Authentication errors**: Re-scan the QR code on the server
+## Notes
 
-### Logging
-
-- Check the Google Apps Script execution logs for debugging (View > Execution Log)
-- Check the Node.js server console for WhatsApp connection issues
+- The system processes edits to rows with complete data (all required fields)
+- Messages are queued and sent with a delay to accommodate rapid consecutive edits
+- Duplicate message detection prevents spamming the group
 
 ## License
 
-This project is provided as-is for educational and personal use.
-
-## Security Note
-
-This implementation uses an unauthenticated API endpoint. For production use, consider adding API key authentication to the WhatsApp server.
+This project is licensed under the MIT License - see the LICENSE file for details.
