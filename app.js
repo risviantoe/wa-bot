@@ -37,6 +37,7 @@ client.on("qr", (qr) => {
 });
 
 client.on("ready", () => {
+  clientReady = true;
   console.log("WhatsApp client is ready!");
 });
 
