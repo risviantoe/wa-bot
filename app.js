@@ -14,9 +14,22 @@ app.use(bodyParser.json());
 const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
-    args: ["--no-sandbox"],
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-accelerated-2d-canvas",
+      "--no-first-run",
+      "--no-zygote",
+      "--disable-gpu",
+    ],
+    ignoreHTTPSErrors: true,
   },
+  restartOnAuthFail: true,
 });
+
+let clientReady = false;
 
 client.on("qr", (qr) => {
   console.log("QR RECEIVED. Scan this with your WhatsApp:");
@@ -35,6 +48,15 @@ client.on("auth_failure", (msg) => {
   console.error("WhatsApp authentication failed:", msg);
 });
 
+client.on("disconnected", (reason) => {
+  clientReady = false;
+  console.log("WhatsApp client disconnected:", reason);
+  console.log("Attempting to reconnect...");
+  setTimeout(() => {
+    client.initialize();
+  }, 5000);
+});
+
 global.pendingCommands = [];
 
 client.on("message", async (msg) => {
@@ -46,6 +68,32 @@ client.on("message", async (msg) => {
     }
   }
 });
+
+const ensureClientReady = () => {
+  return new Promise((resolve, reject) => {
+    if (clientReady) {
+      resolve();
+    } else {
+      console.log("Client not ready, attempting to initialize...");
+      client
+        .initialize()
+        .then(() => {
+          let attempts = 0;
+          const checkReady = setInterval(() => {
+            attempts++;
+            if (clientReady) {
+              clearInterval(checkReady);
+              resolve();
+            } else if (attempts > 30) {
+              clearInterval(checkReady);
+              reject(new Error("Timeout waiting for WhatsApp client to be ready"));
+            }
+          }, 1000);
+        })
+        .catch((err) => reject(err));
+    }
+  });
+};
 
 async function handleCommands(msg, chat) {
   const command = msg.body.toLowerCase().trim();
@@ -106,6 +154,8 @@ app.post("/send-message", async (req, res) => {
       return res.status(400).json({ success: false, error: "Group ID and message are required" });
     }
 
+    await ensureClientReady();
+
     const result = await client.sendMessage(groupId, message);
 
     return res.status(200).json({
@@ -123,6 +173,8 @@ app.post("/send-message", async (req, res) => {
 
 app.get("/get-groups", async (req, res) => {
   try {
+    await ensureClientReady();
+
     const chats = await client.getChats();
     const groups = chats.filter((chat) => chat.isGroup);
 
@@ -199,6 +251,13 @@ app.post("/direct-command", async (req, res) => {
       error: error.message,
     });
   }
+});
+
+app.get("/status", (req, res) => {
+  return res.status(200).json({
+    success: true,
+    clientReady: clientReady,
+  });
 });
 
 app.listen(port, () => {
