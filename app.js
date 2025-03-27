@@ -30,7 +30,68 @@ const client = new Client({
 });
 
 let clientReady = false;
+let isReconnecting = false;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
 
+// Function to handle client reconnection
+const reconnectClient = async () => {
+  if (isReconnecting) return;
+
+  isReconnecting = true;
+  reconnectAttempts++;
+
+  console.log(`Attempting to reconnect (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+
+  try {
+    await client.destroy();
+    console.log("Previous session destroyed");
+
+    setTimeout(async () => {
+      try {
+        await client.initialize();
+        console.log("Client reinitialized");
+      } catch (error) {
+        console.error("Error during client reinitialization:", error);
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+          setTimeout(() => {
+            isReconnecting = false;
+            reconnectClient();
+          }, 10000); // Wait 10 seconds before next attempt
+        } else {
+          console.error("Max reconnection attempts reached, manual intervention required");
+          isReconnecting = false;
+          reconnectAttempts = 0;
+        }
+      }
+    }, 5000); // Wait 5 seconds before reinitializing
+  } catch (error) {
+    console.error("Error during client destroy:", error);
+    isReconnecting = false;
+
+    if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+      setTimeout(reconnectClient, 10000);
+    } else {
+      console.error("Max reconnection attempts reached, manual intervention required");
+      reconnectAttempts = 0;
+    }
+  }
+};
+
+// Helper function to check if error is a session closed error
+const isSessionClosedError = (error) => {
+  if (!error || !error.message) {
+    return false;
+  }
+
+  return (
+    error.message.includes("Session closed") ||
+    error.message.includes("Protocol error") ||
+    error.message.includes("page has been closed")
+  );
+};
+
+// Handle WhatsApp client events
 client.on("qr", (qr) => {
   console.log("QR RECEIVED. Scan this with your WhatsApp:");
   qrcode.generate(qr, { small: true });
@@ -38,6 +99,8 @@ client.on("qr", (qr) => {
 
 client.on("ready", () => {
   clientReady = true;
+  isReconnecting = false;
+  reconnectAttempts = 0;
   console.log("WhatsApp client is ready!");
 });
 
@@ -52,30 +115,51 @@ client.on("auth_failure", (msg) => {
 client.on("disconnected", (reason) => {
   clientReady = false;
   console.log("WhatsApp client disconnected:", reason);
-  console.log("Attempting to reconnect...");
-  setTimeout(() => {
-    client.initialize();
-  }, 5000);
+  reconnectClient();
 });
 
 global.pendingCommands = [];
 
 client.on("message", async (msg) => {
   if (msg.from.endsWith("@g.us")) {
-    const chat = await msg.getChat();
+    try {
+      const chat = await msg.getChat();
 
-    if (msg.body.startsWith("!cek")) {
-      handleCommands(msg, chat);
+      if (msg.body.startsWith("!cek")) {
+        handleCommands(msg, chat);
+      }
+    } catch (error) {
+      console.error("Error processing message:", error);
+      if (isSessionClosedError(error)) {
+        reconnectClient();
+      }
     }
   }
 });
 
 const ensureClientReady = () => {
   return new Promise((resolve, reject) => {
-    if (clientReady) {
+    if (clientReady && !isReconnecting) {
       resolve();
     } else {
       console.log("Client not ready, attempting to initialize...");
+
+      if (isReconnecting) {
+        console.log("Client is currently reconnecting, waiting...");
+        let waitAttempts = 0;
+        const waitInterval = setInterval(() => {
+          waitAttempts++;
+          if (clientReady && !isReconnecting) {
+            clearInterval(waitInterval);
+            resolve();
+          } else if (waitAttempts > 30) {
+            clearInterval(waitInterval);
+            reject(new Error("Timeout waiting for client reconnection"));
+          }
+        }, 1000);
+        return;
+      }
+
       client
         .initialize()
         .then(() => {
@@ -141,12 +225,39 @@ async function handleCommands(msg, chat) {
     }
   } catch (error) {
     console.error("Error handling command:", error);
-    await chat.sendMessage("⚠️ Terjadi kesalahan saat memproses perintah");
+    if (isSessionClosedError(error)) {
+      reconnectClient();
+      await chat.sendMessage("⚠️ Koneksi terputus. Mencoba menghubungkan kembali...");
+    } else {
+      await chat.sendMessage("⚠️ Terjadi kesalahan saat memproses perintah");
+    }
   }
 }
 
 client.initialize();
 
+// Add session health check interval
+const sessionHealthCheck = setInterval(async () => {
+  await runSessionHealthCheck();
+}, 60000); // Check every minute
+
+// Extract the health check logic into a separate function for testing
+const runSessionHealthCheck = async () => {
+  if (clientReady && !isReconnecting) {
+    try {
+      // Perform a lightweight operation to check session health
+      await client.getState();
+    } catch (error) {
+      console.error("Session health check failed:", error);
+      if (isSessionClosedError(error)) {
+        console.log("Detected session closed during health check");
+        reconnectClient();
+      }
+    }
+  }
+};
+
+// Update API endpoints with better error handling
 app.post("/send-message", async (req, res) => {
   try {
     const { groupId, message } = req.body;
@@ -165,6 +276,16 @@ app.post("/send-message", async (req, res) => {
     });
   } catch (error) {
     console.error("Error sending message:", error);
+
+    if (isSessionClosedError(error)) {
+      reconnectClient();
+      return res.status(503).json({
+        success: false,
+        error: "WhatsApp session closed. Reconnecting...",
+        retryAfter: 10,
+      });
+    }
+
     return res.status(500).json({
       success: false,
       error: error.message,
@@ -190,6 +311,16 @@ app.get("/get-groups", async (req, res) => {
     });
   } catch (error) {
     console.error("Error getting groups:", error);
+
+    if (isSessionClosedError(error)) {
+      reconnectClient();
+      return res.status(503).json({
+        success: false,
+        error: "WhatsApp session closed. Reconnecting...",
+        retryAfter: 10,
+      });
+    }
+
     return res.status(500).json({
       success: false,
       error: error.message,
@@ -258,9 +389,54 @@ app.get("/status", (req, res) => {
   return res.status(200).json({
     success: true,
     clientReady: clientReady,
+    isReconnecting: isReconnecting,
+    reconnectAttempts: reconnectAttempts,
   });
 });
 
-app.listen(port, () => {
-  console.log(`WhatsApp API server running on port ${port}`);
+// Add endpoint to force reconnection
+app.post("/force-reconnect", (req, res) => {
+  reconnectClient();
+  return res.status(200).json({
+    success: true,
+    message: "Reconnection process initiated",
+  });
 });
+
+// Clean up resources on server shutdown
+process.on("SIGINT", async () => {
+  clearInterval(sessionHealthCheck);
+  console.log("Shutting down gracefully...");
+  await client.destroy();
+  process.exit(0);
+});
+
+process.on("SIGTERM", async () => {
+  clearInterval(sessionHealthCheck);
+  console.log("Shutting down gracefully...");
+  await client.destroy();
+  process.exit(0);
+});
+
+// Export for testing
+if (process.env.NODE_ENV === "test") {
+  // Create a separate server instance for testing to avoid port conflicts
+  const server = app.listen(0, () => {
+    console.log(`Test server running on port ${server.address().port}`);
+  });
+
+  module.exports = {
+    client,
+    app,
+    server, // Export server so it can be closed in tests
+    isSessionClosedError,
+    reconnectClient,
+    runSessionHealthCheck,
+    sessionHealthCheck,
+  };
+} else {
+  // Only start the server in non-test environments
+  app.listen(port, () => {
+    console.log(`WhatsApp API server running on port ${port}`);
+  });
+}
