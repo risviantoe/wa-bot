@@ -1,28 +1,37 @@
-FROM node:20
+FROM node:18-slim
 
-WORKDIR /usr/src/app
+# Install Chromium dependencies and Puppeteer requirements
+RUN apt-get update && apt-get install -y \
+    gconf-service \
+    libgbm-dev \
+    libasound2 \
+    libatk1.0-0 \
+    libcairo2 \
+    libcups2 \
+    libfontconfig1 \
+    libgdk-pixbuf2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libpango-1.0-0 \
+    libxss1 \
+    fonts-liberation \
+    libappindicator1 \
+    libnss3 \
+    lsb-release \
+    xdg-utils \
+    wget \
+    ca-certificates \
+    --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
 
 COPY package*.json ./
 
-RUN apt-get update && apt-get install -y \
-    libgbm-dev \
-    libnss3 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libxkbcommon0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libasound2
-
-RUN npm install
+RUN npm ci --only=production
 
 COPY . .
 
 EXPOSE 3000
 
-CMD [ "node", "app.js" ]
+CMD ["node", "app.js"]

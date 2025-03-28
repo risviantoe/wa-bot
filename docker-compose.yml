@@ -1,0 +1,28 @@
+version: "3"
+
+services:
+  wa-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wa-bot-lap-keuangan
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./:/app
+      - wa-data:/app/.wwebjs_auth
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - WEBHOOK_URL=${WEBHOOK_URL}
+    networks:
+      - wa-bot-network
+
+networks:
+  wa-bot-network:
+    driver: bridge
+
+volumes:
+  wa-data:
+    driver: local
