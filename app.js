@@ -430,3 +430,26 @@ process.on("SIGTERM", async () => {
   await client.destroy();
   process.exit(0);
 });
+
+// Export for testing
+if (process.env.NODE_ENV === "test") {
+  // Create a separate server instance for testing to avoid port conflicts
+  const server = app.listen(0, () => {
+    console.log(`Test server running on port ${server.address().port}`);
+  });
+
+  module.exports = {
+    client,
+    app,
+    server, // Export server so it can be closed in tests
+    isSessionClosedError,
+    reconnectClient,
+    runSessionHealthCheck,
+    sessionHealthCheck,
+  };
+} else {
+  // Only start the server in non-test environments
+  app.listen(port, () => {
+    console.log(`WhatsApp API server running on port ${port}`);
+  });
+}
