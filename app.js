@@ -283,7 +283,42 @@ app.post("/send-message", async (req, res) => {
 
     await ensureClientReady();
 
-    const result = await client.sendMessage(groupId, message);
+    // Validate the groupId format
+    let validGroupId = groupId.trim();
+
+    // Make sure the ID has the proper format - should end with @g.us for groups
+    if (!validGroupId.endsWith("@g.us")) {
+      // If it's just numbers, add the @g.us suffix
+      if (/^\d+$/.test(validGroupId)) {
+        validGroupId += "@g.us";
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid group ID format. Group IDs must end with @g.us",
+        });
+      }
+    }
+
+    console.log(`Sending message to group ID: ${validGroupId}`);
+
+    // Verify the chat exists before sending
+    try {
+      const chat = await client.getChatById(validGroupId);
+      if (!chat || !chat.isGroup) {
+        return res.status(404).json({
+          success: false,
+          error: "Group not found or invalid",
+        });
+      }
+    } catch (chatError) {
+      console.error("Error retrieving chat:", chatError);
+      return res.status(404).json({
+        success: false,
+        error: "Group not found: " + chatError.message,
+      });
+    }
+
+    const result = await client.sendMessage(validGroupId, message);
 
     return res.status(200).json({
       success: true,
