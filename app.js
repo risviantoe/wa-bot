@@ -189,6 +189,7 @@ async function handleCommands(msg, chat) {
         `*BANTUAN PERINTAH*\n\n` +
         `!cek summary - Melihat ringkasan keuangan\n` +
         `!cek terakhir - Melihat catatan terakhir\n` +
+        `!cek realisasi - Melihat realisasi anggaran\n` +
         `!cek bantuan - Menampilkan pesan ini`;
       await chat.sendMessage(helpMessage);
       return;
@@ -221,6 +222,20 @@ async function handleCommands(msg, chat) {
         console.log("Latest record command sent successfully:", await response.text());
       } catch (err) {
         console.error("Error requesting latest record:", err);
+      }
+    } else if (command === "!cek realisasi") {
+      await chat.sendMessage("⏳ Mengambil data realisasi anggaran...");
+
+      try {
+        const response = await fetch(process.env.WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ command: "realisasi", chatId: msg.from }),
+        });
+
+        console.log("Realisasi anggaran command sent successfully:", await response.text());
+      } catch (err) {
+        console.error("Error requesting realisasi anggaran:", err);
       }
     }
   } catch (error) {
