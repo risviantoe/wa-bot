@@ -283,8 +283,11 @@ app.post("/send-message", async (req, res) => {
 
     await ensureClientReady();
 
-    // Validate the groupId format
-    let validGroupId = groupId.trim();
+    // Convert groupId to string and then validate format
+    let validGroupId = String(groupId).trim();
+
+    // Log the group ID type and value for debugging
+    console.log(`Processing groupId: ${validGroupId} (type: ${typeof validGroupId})`);
 
     // Make sure the ID has the proper format - should end with @g.us for groups
     if (!validGroupId.endsWith("@g.us")) {
