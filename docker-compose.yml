@@ -1,4 +1,4 @@
-version: "3"
+version: "3.8"
 
 services:
   wa-bot:
@@ -18,6 +18,7 @@ services:
       - WEBHOOK_URL=${WEBHOOK_URL}
     networks:
       - wa-bot-network
+    command: npm start
 
 networks:
   wa-bot-network:
