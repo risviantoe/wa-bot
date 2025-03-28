@@ -283,45 +283,7 @@ app.post("/send-message", async (req, res) => {
 
     await ensureClientReady();
 
-    // Convert groupId to string and then validate format
-    let validGroupId = String(groupId).trim();
-
-    // Log the group ID type and value for debugging
-    console.log(`Processing groupId: ${validGroupId} (type: ${typeof validGroupId})`);
-
-    // Make sure the ID has the proper format - should end with @g.us for groups
-    if (!validGroupId.endsWith("@g.us")) {
-      // If it's just numbers, add the @g.us suffix
-      if (/^\d+$/.test(validGroupId)) {
-        validGroupId += "@g.us";
-      } else {
-        return res.status(400).json({
-          success: false,
-          error: "Invalid group ID format. Group IDs must end with @g.us",
-        });
-      }
-    }
-
-    console.log(`Sending message to group ID: ${validGroupId}`);
-
-    // Verify the chat exists before sending
-    try {
-      const chat = await client.getChatById(validGroupId);
-      if (!chat || !chat.isGroup) {
-        return res.status(404).json({
-          success: false,
-          error: "Group not found or invalid",
-        });
-      }
-    } catch (chatError) {
-      console.error("Error retrieving chat:", chatError);
-      return res.status(404).json({
-        success: false,
-        error: "Group not found: " + chatError.message,
-      });
-    }
-
-    const result = await client.sendMessage(validGroupId, message);
+    const result = await client.sendMessage(groupId, message);
 
     return res.status(200).json({
       success: true,
@@ -447,7 +409,6 @@ app.get("/status", (req, res) => {
   });
 });
 
-// Add endpoint to force reconnection
 app.post("/force-reconnect", (req, res) => {
   reconnectClient();
   return res.status(200).json({
@@ -456,7 +417,6 @@ app.post("/force-reconnect", (req, res) => {
   });
 });
 
-// Clean up resources on server shutdown
 process.on("SIGINT", async () => {
   clearInterval(sessionHealthCheck);
   console.log("Shutting down gracefully...");
@@ -470,26 +430,3 @@ process.on("SIGTERM", async () => {
   await client.destroy();
   process.exit(0);
 });
-
-// Export for testing
-if (process.env.NODE_ENV === "test") {
-  // Create a separate server instance for testing to avoid port conflicts
-  const server = app.listen(0, () => {
-    console.log(`Test server running on port ${server.address().port}`);
-  });
-
-  module.exports = {
-    client,
-    app,
-    server, // Export server so it can be closed in tests
-    isSessionClosedError,
-    reconnectClient,
-    runSessionHealthCheck,
-    sessionHealthCheck,
-  };
-} else {
-  // Only start the server in non-test environments
-  app.listen(port, () => {
-    console.log(`WhatsApp API server running on port ${port}`);
-  });
-}
