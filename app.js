@@ -11,246 +11,175 @@ const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: {
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-accelerated-2d-canvas",
-      "--no-first-run",
-      "--no-zygote",
-      "--disable-gpu",
-    ],
-    ignoreHTTPSErrors: true,
-  },
-  restartOnAuthFail: true,
-});
-
+let client;
 let clientReady = false;
 let isReconnecting = false;
 let reconnectAttempts = 0;
-let isInitializing = false;
-const MAX_RECONNECT_ATTEMPTS = 5;
+const MAX_RECONNECT_ATTEMPTS = 3;
 
-const reconnectClient = async () => {
+const createClient = () => {
+  return new Client({
+    authStrategy: new LocalAuth(),
+    puppeteer: {
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--no-first-run",
+        "--no-zygote",
+        "--disable-gpu",
+        "--single-process",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
+      ],
+      ignoreHTTPSErrors: true,
+    },
+    restartOnAuthFail: true,
+  });
+};
+
+const setupClientEvents = () => {
+  client.on("qr", (qr) => {
+    console.log("QR RECEIVED. Scan this with your WhatsApp:");
+    qrcode.generate(qr, { small: true });
+    clientReady = false;
+  });
+
+  client.on("ready", () => {
+    clientReady = true;
+    isReconnecting = false;
+    reconnectAttempts = 0;
+    console.log("WhatsApp client is ready!");
+    console.log("Client info:", client.info ? "Available" : "Not available");
+  });
+
+  client.on("authenticated", () => {
+    console.log("WhatsApp authentication successful");
+    console.log("Waiting for ready event...");
+  });
+
+  client.on("auth_failure", (msg) => {
+    console.error("WhatsApp authentication failed:", msg);
+    clientReady = false;
+    forceRestart();
+  });
+
+  client.on("disconnected", (reason) => {
+    clientReady = false;
+    console.log("WhatsApp client disconnected:", reason);
+    forceRestart();
+  });
+
+  client.on("loading_screen", (percent, message) => {
+    console.log("Loading screen:", percent, message);
+  });
+
+  client.on("message", async (msg) => {
+    if (msg.from.endsWith("@g.us")) {
+      try {
+        const chat = await msg.getChat();
+        if (msg.body.startsWith("!cek")) {
+          handleCommands(msg, chat);
+        }
+      } catch (error) {
+        console.error("Error processing message:", error);
+      }
+    }
+  });
+};
+
+const forceRestart = async () => {
   if (isReconnecting) return;
 
   isReconnecting = true;
   reconnectAttempts++;
 
-  console.log(`Attempting to reconnect (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+  console.log(`Force restarting client (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
 
   try {
-    await client.destroy();
-    console.log("Previous session destroyed");
-
-    setTimeout(async () => {
-      try {
-        await client.initialize();
-        console.log("Client reinitialized");
-      } catch (error) {
-        console.error("Error during client reinitialization:", error);
-        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-          setTimeout(() => {
-            isReconnecting = false;
-            reconnectClient();
-          }, 10000);
-        } else {
-          console.error("Max reconnection attempts reached, manual intervention required");
-          isReconnecting = false;
-          reconnectAttempts = 0;
-        }
-      }
-    }, 5000);
+    if (client) {
+      await client.destroy();
+    }
   } catch (error) {
-    console.error("Error during client destroy:", error);
+    console.error("Error destroying client:", error);
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+
+  try {
+    client = createClient();
+    setupClientEvents();
+    await client.initialize();
+    console.log("Client restarted successfully");
+  } catch (error) {
+    console.error("Error restarting client:", error);
     isReconnecting = false;
 
     if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-      setTimeout(reconnectClient, 10000);
+      setTimeout(() => forceRestart(), 5000);
     } else {
-      console.error("Max reconnection attempts reached, manual intervention required");
+      console.error("Max restart attempts reached");
       reconnectAttempts = 0;
     }
   }
 };
 
 const isSessionClosedError = (error) => {
-  if (!error || !error.message) {
-    return false;
-  }
+  if (!error || !error.message) return false;
 
   return (
     error.message.includes("Session closed") ||
     error.message.includes("Protocol error") ||
-    error.message.includes("page has been closed")
+    error.message.includes("page has been closed") ||
+    error.message.includes("browser has disconnected") ||
+    error.message.includes("Navigation failed")
   );
 };
-
-client.on("qr", (qr) => {
-  console.log("QR RECEIVED. Scan this with your WhatsApp:");
-  qrcode.generate(qr, { small: true });
-  clientReady = false;
-});
-
-client.on("ready", () => {
-  clientReady = true;
-  isReconnecting = false;
-  isInitializing = false;
-  reconnectAttempts = 0;
-  console.log("WhatsApp client is ready!");
-  console.log("Client info:", client.info ? "Available" : "Not available");
-});
-
-client.on("authenticated", () => {
-  console.log("WhatsApp authentication successful");
-  console.log("Waiting for ready event...");
-});
-
-client.on("auth_failure", (msg) => {
-  console.error("WhatsApp authentication failed:", msg);
-  clientReady = false;
-  isInitializing = false;
-});
-
-client.on("disconnected", (reason) => {
-  clientReady = false;
-  isInitializing = false;
-  console.log("WhatsApp client disconnected:", reason);
-  reconnectClient();
-});
-
-client.on("loading_screen", (percent, message) => {
-  console.log("Loading screen:", percent, message);
-});
-
-global.pendingCommands = [];
-
-client.on("message", async (msg) => {
-  if (msg.from.endsWith("@g.us")) {
-    try {
-      const chat = await msg.getChat();
-
-      if (msg.body.startsWith("!cek")) {
-        handleCommands(msg, chat);
-      }
-    } catch (error) {
-      console.error("Error processing message:", error);
-      if (isSessionClosedError(error)) {
-        reconnectClient();
-      }
-    }
-  }
-});
 
 const ensureClientReady = () => {
   return new Promise((resolve, reject) => {
     console.log("Current client state:", {
       clientReady,
       isReconnecting,
-      isInitializing,
-      hasInfo: !!client.info,
+      hasClient: !!client,
+      hasInfo: client ? !!client.info : false,
     });
 
-    if (clientReady && !isReconnecting) {
+    if (clientReady && !isReconnecting && client) {
       resolve();
       return;
     }
 
-    if (client.info && !clientReady && !isReconnecting) {
-      console.log("Client authenticated but not ready, waiting for ready event...");
+    if (isReconnecting) {
+      reject(new Error("Client is reconnecting, please try again later"));
+      return;
+    }
+
+    if (!client) {
+      reject(new Error("Client not initialized"));
+      return;
+    }
+
+    if (client.info && !clientReady) {
+      console.log("Client authenticated but not ready, waiting...");
       let attempts = 0;
       const waitForReady = setInterval(() => {
         attempts++;
-        console.log(`Waiting for ready state... attempt ${attempts}/60`);
         if (clientReady) {
           clearInterval(waitForReady);
-          console.log("Client is now ready!");
           resolve();
-        } else if (attempts > 60) {
+        } else if (attempts > 30) {
           clearInterval(waitForReady);
-          isInitializing = false;
-          reject(new Error("Timeout waiting for ready"));
+          reject(new Error("Timeout waiting for ready state"));
         }
       }, 1000);
       return;
     }
 
-    if (isReconnecting) {
-      console.log("Client is currently reconnecting, waiting...");
-      let waitAttempts = 0;
-      const waitInterval = setInterval(() => {
-        waitAttempts++;
-        if (clientReady && !isReconnecting) {
-          clearInterval(waitInterval);
-          resolve();
-        } else if (waitAttempts > 60) {
-          clearInterval(waitInterval);
-          isInitializing = false;
-          reject(new Error("Timeout waiting for client reconnection"));
-        }
-      }, 1000);
-      return;
-    }
-
-    if (isInitializing) {
-      console.log("Client is already initializing, waiting...");
-      let attempts = 0;
-      const waitForInit = setInterval(() => {
-        attempts++;
-        console.log(`Waiting for initialization... attempt ${attempts}/60`);
-        if (clientReady) {
-          clearInterval(waitForInit);
-          isInitializing = false;
-          resolve();
-        } else if (attempts > 60) {
-          clearInterval(waitForInit);
-          isInitializing = false;
-          console.log("Initialization timeout, forcing restart...");
-          setTimeout(() => {
-            reconnectClient();
-          }, 2000);
-          reject(new Error("Timeout waiting for initialization"));
-        }
-      }, 1000);
-      return;
-    }
-
-    console.log("Initializing client...");
-    isInitializing = true;
-    client
-      .initialize()
-      .then(() => {
-        console.log("Client initialization started, waiting for ready...");
-        let attempts = 0;
-        const checkReady = setInterval(() => {
-          attempts++;
-          if (clientReady) {
-            clearInterval(checkReady);
-            isInitializing = false;
-            resolve();
-          } else if (attempts > 60) {
-            clearInterval(checkReady);
-            isInitializing = false;
-            console.log("Ready timeout, forcing restart...");
-            setTimeout(() => {
-              reconnectClient();
-            }, 2000);
-            reject(new Error("Timeout waiting for WhatsApp client to be ready"));
-          }
-        }, 1000);
-      })
-      .catch((err) => {
-        console.error("Client initialization failed:", err);
-        isInitializing = false;
-        setTimeout(() => {
-          reconnectClient();
-        }, 2000);
-        reject(err);
-      });
+    reject(new Error("Client not ready and not authenticated"));
   });
 };
 
@@ -271,42 +200,36 @@ async function handleCommands(msg, chat) {
 
     if (command === "!cek summary") {
       await chat.sendMessage("⏳ Mengambil ringkasan keuangan...");
-
       try {
         const response = await fetch(process.env.WEBHOOK_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ command: "summary", chatId: msg.from }),
         });
-
         console.log("Summary command sent successfully:", await response.text());
       } catch (err) {
         console.error("Error requesting summary:", err);
       }
     } else if (command === "!cek terakhir") {
       await chat.sendMessage("⏳ Mengambil catatan keuangan terakhir...");
-
       try {
         const response = await fetch(process.env.WEBHOOK_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ command: "terakhir", chatId: msg.from }),
         });
-
         console.log("Latest record command sent successfully:", await response.text());
       } catch (err) {
         console.error("Error requesting latest record:", err);
       }
     } else if (command === "!cek realisasi") {
       await chat.sendMessage("⏳ Mengambil data realisasi anggaran...");
-
       try {
         const response = await fetch(process.env.WEBHOOK_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ command: "realisasi", chatId: msg.from }),
         });
-
         console.log("Realisasi anggaran command sent successfully:", await response.text());
       } catch (err) {
         console.error("Error requesting realisasi anggaran:", err);
@@ -314,47 +237,51 @@ async function handleCommands(msg, chat) {
     }
   } catch (error) {
     console.error("Error handling command:", error);
-    if (isSessionClosedError(error)) {
-      reconnectClient();
-      await chat.sendMessage("⚠️ Koneksi terputus. Mencoba menghubungkan kembali...");
-    } else {
-      await chat.sendMessage("⚠️ Terjadi kesalahan saat memproses perintah");
-    }
+    await chat.sendMessage("⚠️ Terjadi kesalahan saat memproses perintah");
   }
 }
 
-client.initialize();
-
-const sessionHealthCheck = setInterval(async () => {
-  await runSessionHealthCheck();
-}, 60000);
+const initializeApp = async () => {
+  try {
+    client = createClient();
+    setupClientEvents();
+    await client.initialize();
+    console.log("Initial client setup completed");
+  } catch (error) {
+    console.error("Initial setup failed:", error);
+    forceRestart();
+  }
+};
 
 const runSessionHealthCheck = async () => {
-  if (clientReady && !isReconnecting) {
+  if (clientReady && !isReconnecting && client) {
     try {
       await client.getState();
     } catch (error) {
       console.error("Session health check failed:", error);
       if (isSessionClosedError(error)) {
         console.log("Detected session closed during health check");
-        reconnectClient();
+        forceRestart();
       }
     }
   }
 };
 
+const sessionHealthCheck = setInterval(runSessionHealthCheck, 60000);
+
 app.post("/send-message", async (req, res) => {
   try {
     const { groupId, message } = req.body;
-
     console.log("GroupID:", groupId);
 
     if (!groupId || !message) {
-      return res.status(400).json({ success: false, error: "Group ID and message are required" });
+      return res.status(400).json({
+        success: false,
+        error: "Group ID and message are required",
+      });
     }
 
     await ensureClientReady();
-
     const result = await client.sendMessage(groupId, message);
 
     return res.status(200).json({
@@ -365,7 +292,7 @@ app.post("/send-message", async (req, res) => {
     console.error("Error sending message:", error);
 
     if (isSessionClosedError(error)) {
-      reconnectClient();
+      forceRestart();
       return res.status(503).json({
         success: false,
         error: "WhatsApp session closed. Reconnecting...",
@@ -383,7 +310,6 @@ app.post("/send-message", async (req, res) => {
 app.get("/get-groups", async (req, res) => {
   try {
     await ensureClientReady();
-
     const chats = await client.getChats();
     const groups = chats.filter((chat) => chat.isGroup);
 
@@ -398,73 +324,6 @@ app.get("/get-groups", async (req, res) => {
     });
   } catch (error) {
     console.error("Error getting groups:", error);
-
-    if (isSessionClosedError(error)) {
-      reconnectClient();
-      return res.status(503).json({
-        success: false,
-        error: "WhatsApp session closed. Reconnecting...",
-        retryAfter: 10,
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      error: error.message,
-    });
-  }
-});
-
-app.get("/check-commands", async (req, res) => {
-  try {
-    const commands = [...(global.pendingCommands || [])];
-    global.pendingCommands = [];
-
-    console.log(`Returning ${commands.length} pending commands`);
-
-    return res.status(200).json({
-      success: true,
-      pendingCommands: commands,
-    });
-  } catch (error) {
-    console.error("Error checking commands:", error);
-    return res.status(500).json({
-      success: false,
-      error: error.message,
-    });
-  }
-});
-
-app.get("/ping", (req, res) => {
-  return res.status(200).json({
-    success: true,
-    message: "WhatsApp API server is running",
-    clientStatus: client.info ? "authenticated" : "not authenticated",
-  });
-});
-
-app.post("/direct-command", async (req, res) => {
-  try {
-    const { command, chatId } = req.body;
-
-    if (!command || !chatId) {
-      return res.status(400).json({ success: false, error: "Command and chatId are required" });
-    }
-
-    const response = await fetch(process.env.WEBHOOK_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ command, chatId }),
-    });
-
-    const commandResult = await response.json();
-
-    return res.status(200).json({
-      success: true,
-      result: commandResult,
-    });
-  } catch (error) {
-    console.error("Error processing direct command:", error);
     return res.status(500).json({
       success: false,
       error: error.message,
@@ -478,47 +337,46 @@ app.get("/status", (req, res) => {
     clientReady: clientReady,
     isReconnecting: isReconnecting,
     reconnectAttempts: reconnectAttempts,
+    hasClient: !!client,
   });
 });
 
 app.post("/force-reconnect", (req, res) => {
-  reconnectClient();
+  forceRestart();
   return res.status(200).json({
     success: true,
-    message: "Reconnection process initiated",
+    message: "Force restart initiated",
+  });
+});
+
+app.get("/ping", (req, res) => {
+  return res.status(200).json({
+    success: true,
+    message: "WhatsApp API server is running",
+    clientStatus: client && client.info ? "authenticated" : "not authenticated",
   });
 });
 
 process.on("SIGINT", async () => {
   clearInterval(sessionHealthCheck);
   console.log("Shutting down gracefully...");
-  await client.destroy();
+  if (client) {
+    await client.destroy();
+  }
   process.exit(0);
 });
 
 process.on("SIGTERM", async () => {
   clearInterval(sessionHealthCheck);
   console.log("Shutting down gracefully...");
-  await client.destroy();
+  if (client) {
+    await client.destroy();
+  }
   process.exit(0);
 });
 
-if (process.env.NODE_ENV === "test") {
-  const server = app.listen(0, () => {
-    console.log(`Test server running on port ${server.address().port}`);
-  });
+initializeApp();
 
-  module.exports = {
-    client,
-    app,
-    server,
-    isSessionClosedError,
-    reconnectClient,
-    runSessionHealthCheck,
-    sessionHealthCheck,
-  };
-} else {
-  app.listen(port, () => {
-    console.log(`WhatsApp API server running on port ${port}`);
-  });
-}
+app.listen(port, () => {
+  console.log(`WhatsApp API server running on port ${port}`);
+});
